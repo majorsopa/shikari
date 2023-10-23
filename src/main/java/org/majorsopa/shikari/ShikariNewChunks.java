@@ -90,17 +90,6 @@ public class ShikariNewChunks extends ToggleableModule {
 			.incremental(1);
 
 
-
-	private final StringSetting exampleString = new StringSetting("String", "Hello World!")
-			
-			//disables the rendering of the setting name in the clickgui
-			.setNameVisible(false);
-	
-	private final BindSetting rotate = new BindSetting("RotateBind", NullKey.INSTANCE /* unbound */);
-	
-	/**
-	 * Constructor
-	 */
 	public ShikariNewChunks() {
 		super("ShikariNewChunks", "find stuff", ModuleCategory.WORLD);
 
@@ -121,58 +110,7 @@ public class ShikariNewChunks extends ToggleableModule {
 				this.misturnedDeepslate
 		);
 	}
-	
-	/**
-	 * 2d renderer demo
-	 */
-	//@Subscribe
-	//private void onRender2D(EventRender2D event) {
-	//
-	//	//renderers
-	//	final IRenderer2D renderer = RusherHackAPI.getRenderer2D();
-	//	final IFontRenderer fontRenderer = RusherHackAPI.fonts().getFontRenderer();
-	//
-	//	//must begin renderer first
-	//	renderer.begin(event.getMatrixStack(), fontRenderer);
-	//
-	//	//draw stuff
-	//	renderer.drawRectangle(100, 100 + this.exampleDouble.getValue(), 100, 100, this.exampleColor.getValueRGB());
-	//	fontRenderer.drawString(this.exampleString.getValue(), 110, 110, Color.WHITE.getRGB());
-	//
-	//	//end renderer
-	//	renderer.end();
-	//
-	//}
-	
-	/**
-	 * Rotation demo
-	 */
-	//@Subscribe
-	//private void onUpdate(EventUpdate event) {
-	//
-	//	//only rotate while bind is held
-	//	if(this.rotate.getValue().isKeyDown()) {
-	//
-	//		//loop through entities to find a target
-	//		Entity target = null;
-	//		double dist = 999d;
-	//		for(Entity entity : WorldUtils.getEntitiesSorted()) {
-	//			if(mc.player.distanceTo(entity) < dist && entity instanceof LivingEntity) {
-	//				target = entity;
-	//				dist = mc.player.distanceTo(entity);
-	//			}
-	//		}
-	//
-	//		//rotate to target
-	//		if(target != null) {
-	//			RusherHackAPI.getRotationManager().updateRotation(target);
-	//		} else { //or rotate to the custom yaw
-	//			RusherHackAPI.getRotationManager().updateRotation(this.rotateYaw.getValue(), this.rotatePitch.getValue());
-	//		}
-	//	}
-	//}
 
-	// todo maybe not check every chunk a ton of times, that would be pretty cool i think
 	@Subscribe
 	private void onRender3D(EventRender3D event) {
 		final IRenderer3D renderer = event.getRenderer();
