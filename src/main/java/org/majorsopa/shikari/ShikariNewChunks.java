@@ -13,20 +13,18 @@ import org.rusherhack.client.api.events.render.EventRender3D;
 import org.rusherhack.client.api.feature.module.ModuleCategory;
 import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
-import org.rusherhack.client.api.setting.BindSetting;
 import org.rusherhack.client.api.setting.ColorSetting;
 import org.rusherhack.client.api.utils.WorldUtils;
-import org.rusherhack.core.bind.key.NullKey;
 import org.rusherhack.core.event.subscribe.Subscribe;
 import org.rusherhack.core.setting.BooleanSetting;
 import org.rusherhack.core.setting.NumberSetting;
-import org.rusherhack.core.setting.StringSetting;
 import org.rusherhack.core.utils.ColorUtils;
 
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 
 /**
  * newchunks module
@@ -106,8 +104,16 @@ public class ShikariNewChunks extends ToggleableModule {
 				this.deepslateCheckSkeletonHead
 		);
 
+		this.missingBrute.addSubSettings(
+				this.missingBruteChunkColor,
+				this.missingBruteRenderY,
+				this.missingBruteMaxDistance
+		);
+
+
 		this.registerSettings(
-				this.misturnedDeepslate
+				this.misturnedDeepslate,
+				this.missingBrute
 		);
 	}
 
@@ -175,7 +181,7 @@ public class ShikariNewChunks extends ToggleableModule {
 	}
 
 	@SafeVarargs
-	private void checkChunkForBlock(int minCheckY, int maxCheckY, int maxDistance, BooleanSetting check, Function3<LevelChunk, BlockPos, BooleanSetting, Boolean>... checkBlockPos) {
+	private void checkChunkForBlock(int minCheckY, int maxCheckY, int maxDistance, BooleanSetting check, BiFunction<CheckableObject, BooleanSetting, Boolean>... checkBlockPos) {
 		assert mc.player != null;
 
 		final ArrayList<LevelChunk> checkChunks = (ArrayList<LevelChunk>) WorldUtils.getChunks();
@@ -191,8 +197,9 @@ public class ShikariNewChunks extends ToggleableModule {
 				for (int y = minCheckY; y < maxCheckY; y++) {
 					for (int z = 0; z < 16; z++) {
 						BlockPos relativePos = new BlockPos(x, y, z);
-						for (Function3<LevelChunk, BlockPos, BooleanSetting, Boolean> blockCheck : checkBlockPos) {
-							if (blockCheck.apply(chunk, relativePos, check)) {
+						CheckableObject checkableObject = new CheckableObject(chunk, relativePos);
+						for (BiFunction<CheckableObject, BooleanSetting, Boolean> blockCheck : checkBlockPos) {
+							if (blockCheck.apply(checkableObject, check)) {
 								this.chunkCache.get(chunk).add(relativePos);
 							}
 						}
@@ -232,7 +239,10 @@ public class ShikariNewChunks extends ToggleableModule {
 }
 
 class BlockChecks {
-	static boolean isMisturnedDeepslate(LevelChunk chunk, BlockPos blockPos, BooleanSetting check) {
+	static boolean isMisturnedDeepslate(CheckableObject checkableObject, BooleanSetting check) {
+		LevelChunk chunk = checkableObject.getChunk();
+		BlockPos blockPos = checkableObject.getBlockPos();
+
 		boolean misturned = chunk.getBlockState(blockPos).getBlock() == Blocks.DEEPSLATE && chunk.getBlockState(blockPos) != chunk.getBlockState(blockPos).getBlock().defaultBlockState();
 		assert Minecraft.getInstance().level != null;
 		// search nearby blocks for skeleton head, avoiding false positives from deep darks
@@ -257,5 +267,44 @@ class BlockChecks {
 			}
 		}
 		return misturned;
+	}
+}
+
+class CheckableObject {
+	private CheckableType checkableType = null;
+	private LevelChunk chunk = null;
+	private BlockPos blockPos = null;
+	private Entity entity = null;
+
+	public CheckableObject(LevelChunk chunk, BlockPos blockPos) {
+		this.checkableType = CheckableType.BLOCK;
+		this.chunk = chunk;
+		this.blockPos = blockPos;
+	}
+
+	public CheckableObject(Entity entity) {
+		this.checkableType = CheckableType.ENTITY;
+		this.entity = entity;
+	}
+
+	public CheckableType getCheckableType() {
+		return this.checkableType;
+	}
+
+	public LevelChunk getChunk() {
+		return this.chunk;
+	}
+
+	public BlockPos getBlockPos() {
+		return this.blockPos;
+	}
+
+	public Entity getEntity() {
+		return this.entity;
+	}
+
+	enum CheckableType {
+		BLOCK,
+		ENTITY
 	}
 }
