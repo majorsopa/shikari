@@ -1,6 +1,5 @@
 package org.majorsopa.shikari;
 
-import org.majorsopa.shikari.modules.ShikariNewChunks;
 import org.rusherhack.client.api.RusherHackAPI;
 import org.rusherhack.client.api.plugin.Plugin;
 

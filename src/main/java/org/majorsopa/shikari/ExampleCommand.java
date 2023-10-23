@@ -1,4 +1,4 @@
-package org.majorsopa.shikari.commands;
+package org.majorsopa.shikari;
 
 import org.rusherhack.client.api.feature.command.Command;
 import org.rusherhack.core.command.annotations.CommandExecutor;

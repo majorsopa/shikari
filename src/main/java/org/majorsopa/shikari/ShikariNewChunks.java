@@ -1,9 +1,10 @@
-package org.majorsopa.shikari.modules;
+package org.majorsopa.shikari;
 
 import com.mojang.datafixers.util.Function3;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -26,7 +27,6 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * newchunks module
@@ -72,6 +72,23 @@ public class ShikariNewChunks extends ToggleableModule {
 			32
 	)
 			.incremental(1);
+
+	private final BooleanSetting missingBrute = new BooleanSetting("MissingBrute", "Chunks with misoriented deepslate", true);
+	private final ColorSetting missingBruteChunkColor = new ColorSetting("ChunkColor", Color.RED)
+			.setAlphaAllowed(true)
+			.setThemeSyncAllowed(false)
+			.setRainbowAllowed(false);
+	private final NumberSetting<Double> missingBruteRenderY = new NumberSetting<>("RenderY", 0.0, -64.0, 320.0)
+			.incremental(1.0);
+	private final NumberSetting<Integer> missingBruteMaxDistance = new NumberSetting<>(
+			"MaxDistance",
+			"Max distance to check, in chunks (chessboard)",
+			8,
+			0,
+			32
+	)
+			.incremental(1);
+
 
 
 	private final StringSetting exampleString = new StringSetting("String", "Hello World!")
@@ -180,8 +197,7 @@ public class ShikariNewChunks extends ToggleableModule {
 	}
 
 	private void handleChunkRender(IRenderer3D renderer, LevelChunk chunk, @NotNull BooleanSetting check) {
-		final ColorSetting colorSetting = ((ColorSetting) check.getSubSetting("ChunkColor"));
-		final int color = ColorUtils.transparency(colorSetting.getValueRGB(), colorSetting.getAlpha() / 255f);
+		final int color = getColorFromCheck(check, "ChunkColor");
 
 		final double y = (double) check.getSubSetting("RenderY").getValue();
 
@@ -189,12 +205,21 @@ public class ShikariNewChunks extends ToggleableModule {
 	}
 
 	private void handleBlocksRender(IRenderer3D renderer, LevelChunk chunk, ArrayList<BlockPos> blocks, @NotNull BooleanSetting check) {
-		final ColorSetting blockColorSetting = ((ColorSetting) check.getSubSetting("BlockColor"));
-		final int color = ColorUtils.transparency(blockColorSetting.getValueRGB(), blockColorSetting.getAlpha() / 255f);
+		final int color = getColorFromCheck(check, "BlockColor");
 		ChunkPos chunkOffset = chunk.getPos();
 		for (BlockPos pos : blocks) {
 			renderer.drawBox(pos.offset(chunkOffset.x * 16, 0, chunkOffset.z * 16),true, true, color);
 		}
+	}
+
+	private void handleEntityRender(IRenderer3D renderer, EventRender3D event, Entity entity, @NotNull BooleanSetting check) {
+		final int color = getColorFromCheck(check, "EntityColor");
+		renderer.drawBox(entity, event.getPartialTicks(), true, true, color);
+	}
+
+	private int getColorFromCheck(BooleanSetting check, String subSettingName) {
+		final ColorSetting colorSetting = ((ColorSetting) check.getSubSetting(subSettingName));
+		return ColorUtils.transparency(colorSetting.getValueRGB(), colorSetting.getAlpha() / 255f);
 	}
 
 	private void renderChunk(@NotNull IRenderer3D renderer, @NotNull LevelChunk chunk, double y, boolean fill, boolean outline, int color) {
