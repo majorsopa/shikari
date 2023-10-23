@@ -1,6 +1,5 @@
 package org.majorsopa.shikari;
 
-import com.mojang.datafixers.util.Function3;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -181,32 +180,30 @@ public class ShikariNewChunks extends ToggleableModule {
 	}
 
 	@SafeVarargs
-	private void checkChunkForBlock(int minCheckY, int maxCheckY, int maxDistance, BooleanSetting check, BiFunction<CheckableObject, BooleanSetting, Boolean>... checkBlockPos) {
-		assert mc.player != null;
+	private static ArrayList<BlockPos> checkChunkForBlock(int minCheckY, int maxCheckY, LevelChunk chunk, BooleanSetting check, BiFunction<CheckableObject, BooleanSetting, Boolean>... checkBlockPos) {
+		ArrayList<BlockPos> blocks = new ArrayList<>();
 
-		final ArrayList<LevelChunk> checkChunks = (ArrayList<LevelChunk>) WorldUtils.getChunks();
-		checkChunks.removeIf(chunk -> mc.player.chunkPosition().getChessboardDistance(chunk.getPos()) > maxDistance);
-
-		for (LevelChunk chunk : checkChunks) {
-			if (this.chunkCache.containsKey(chunk)) {
-				continue;
-			} else {
-				this.chunkCache.put(chunk, new ArrayList<>());
-			}
-			for (int x = 0; x < 16; x++) {
-				for (int y = minCheckY; y < maxCheckY; y++) {
-					for (int z = 0; z < 16; z++) {
-						BlockPos relativePos = new BlockPos(x, y, z);
-						CheckableObject checkableObject = new CheckableObject(chunk, relativePos);
-						for (BiFunction<CheckableObject, BooleanSetting, Boolean> blockCheck : checkBlockPos) {
-							if (blockCheck.apply(checkableObject, check)) {
-								this.chunkCache.get(chunk).add(relativePos);
-							}
+		for (int x = 0; x < 16; x++) {
+			for (int y = minCheckY; y < maxCheckY; y++) {
+				for (int z = 0; z < 16; z++) {
+					BlockPos relativePos = new BlockPos(x, y, z);
+					CheckableObject checkableObject = new CheckableObject(chunk, relativePos);
+					for (BiFunction<CheckableObject, BooleanSetting, Boolean> blockCheck : checkBlockPos) {
+						if (blockCheck.apply(checkableObject, check)) {
+							blocks.add(relativePos);
 						}
 					}
 				}
 			}
 		}
+
+		return blocks;
+	}
+
+	private Entity checkChunkForEntity(BooleanSetting check, BiFunction<CheckableObject, BooleanSetting, Boolean>... checkEntity) {
+		assert mc.player != null;
+
+		return null;
 	}
 
 	@Override
@@ -217,14 +214,26 @@ public class ShikariNewChunks extends ToggleableModule {
 				int minCheckY = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MinCheckY")).getValue();
 				int maxDistance = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MaxDistance")).getValue();
 				if (minCheckY <= maxCheckY) {
+					final ArrayList<LevelChunk> checkChunks = (ArrayList<LevelChunk>) WorldUtils.getChunks();
+					checkChunks.removeIf(chunk -> mc.player.chunkPosition().getChessboardDistance(chunk.getPos()) > maxDistance);
 
-					checkChunkForBlock(
-							minCheckY,
-							maxCheckY,
-							maxDistance,
-							this.misturnedDeepslate,
-							BlockChecks::isMisturnedDeepslate
-					);
+					for (LevelChunk chunk : checkChunks) {
+						if (this.chunkCache.containsKey(chunk)) {
+							continue;
+						} else {
+							this.chunkCache.put(chunk, new ArrayList<>());
+						}
+
+						this.chunkCache.get(chunk).addAll(
+								checkChunkForBlock(
+										minCheckY,
+										maxCheckY,
+										chunk,
+										this.misturnedDeepslate,
+										BlockChecks::isMisturnedDeepslate
+								)
+						);
+					}
 				}
 			}
 		});
@@ -251,6 +260,7 @@ class BlockChecks {
 			int checkDistance = ((NumberSetting<Integer>)checkSkeletonHead.getSubSetting("SkeletonHeadDistance")).getValue();
 			// todo use getBlockStates method
 			for (int x = -checkDistance; x <= checkDistance; x++) {
+				// todo see how low it's possible to start checking, also maybe stop looking if there is more misturned deepslate close to the original block
 				for (int y = -checkDistance; y <= 0; y++) {  // skeleton heads are always lower
 					for (int z = -checkDistance; z <= checkDistance; z++) {
 						if (Minecraft.getInstance().level.getBlockState(
