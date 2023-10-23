@@ -6,9 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.NotNull;
 import org.rusherhack.client.api.events.render.EventRender3D;
 import org.rusherhack.client.api.feature.module.ModuleCategory;
@@ -16,7 +14,6 @@ import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
 import org.rusherhack.client.api.setting.BindSetting;
 import org.rusherhack.client.api.setting.ColorSetting;
-import org.rusherhack.client.api.utils.ChatUtils;
 import org.rusherhack.client.api.utils.WorldUtils;
 import org.rusherhack.core.bind.key.NullKey;
 import org.rusherhack.core.event.subscribe.Subscribe;
@@ -27,10 +24,9 @@ import org.rusherhack.core.utils.ColorUtils;
 
 import java.awt.*;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.function.Function;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * newchunks module
@@ -38,9 +34,11 @@ import java.util.function.Function;
  * @author majorsopa
  */
 public class ShikariNewChunks extends ToggleableModule {
+	Thread checkThread;
+
 
 	// the cached BlockPos are relative to the chunk
-	HashMap<LevelChunk, ArrayList<BlockPos>> chunkCache = new HashMap<>();
+	ConcurrentHashMap<LevelChunk, ArrayList<BlockPos>> chunkCache = new ConcurrentHashMap<>();
 
 	private final BooleanSetting misturnedDeepslate = new BooleanSetting("MisturnedDeepslate", "Chunks with misoriented deepslate", true);
 	private final ColorSetting misturnedDeepslateChunkColor = new ColorSetting("ChunkColor", Color.RED)
@@ -74,7 +72,6 @@ public class ShikariNewChunks extends ToggleableModule {
 			32
 	)
 			.incremental(1);
-	private final BooleanSetting deepslateCacheResult = new BooleanSetting("CacheResult", "Cache the result of the chunk check", true);
 
 
 	private final StringSetting exampleString = new StringSetting("String", "Hello World!")
@@ -83,8 +80,6 @@ public class ShikariNewChunks extends ToggleableModule {
 			.setNameVisible(false);
 	
 	private final BindSetting rotate = new BindSetting("RotateBind", NullKey.INSTANCE /* unbound */);
-	private final NumberSetting<Float> rotateYaw = new NumberSetting<>("Yaw", 0f, 0f, 360f).incremental(0.1f);
-	private final NumberSetting<Float> rotatePitch = new NumberSetting<>("Pitch", 0f, -90f, 90f).incremental(0.1f);
 	
 	/**
 	 * Constructor
@@ -102,8 +97,7 @@ public class ShikariNewChunks extends ToggleableModule {
 				this.deepslateMinCheckY,
 				this.deepslateMaxCheckY,
 				this.deepslateMaxDistance,
-				this.deepslateCheckSkeletonHead,
-				this.deepslateCacheResult
+				this.deepslateCheckSkeletonHead
 		);
 
 		this.registerSettings(
@@ -169,40 +163,16 @@ public class ShikariNewChunks extends ToggleableModule {
 		//begin renderer
 		renderer.begin(event.getMatrixStack());
 
-		if (this.misturnedDeepslate.getValue()) {
-			int maxCheckY = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MaxCheckY")).getValue();
-			int minCheckY = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MinCheckY")).getValue();
-			int maxDistance = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MaxDistance")).getValue();
-			boolean useCache = ((BooleanSetting)this.misturnedDeepslate.getSubSetting("CacheResult")).getValue();
-			if (minCheckY <= maxCheckY) {
-				final ColorSetting blockColorSetting = ((ColorSetting) this.misturnedDeepslate.getSubSetting("BlockColor"));
-				final int color = ColorUtils.transparency(blockColorSetting.getValueRGB(), blockColorSetting.getAlpha() / 255f);
+		for (Map.Entry<LevelChunk, ArrayList<BlockPos>> entry : this.chunkCache.entrySet()) {
+			LevelChunk chunk = entry.getKey();
+			ArrayList<BlockPos> blocks = entry.getValue();
 
-				checkChunkForBlock(
-						minCheckY,
-						maxCheckY,
-						maxDistance,
-						useCache,
-						this.misturnedDeepslate,
-						BlockChecks::isMisturnedDeepslate
-				);
-
-				for (Map.Entry<LevelChunk, ArrayList<BlockPos>> entry : this.chunkCache.entrySet()) {
-					LevelChunk chunk = entry.getKey();
-					ArrayList<BlockPos> blocks = entry.getValue();
-
-					if (blocks.isEmpty()) {
-						continue;
-					}
-
-					handleChunkRender(renderer, chunk, this.misturnedDeepslate);
-
-					ChunkPos chunkOffset = chunk.getPos();
-					for (BlockPos pos : blocks) {
-						renderer.drawBox(pos.offset(chunkOffset.x * 16, 0, chunkOffset.z * 16),true, true, color);
-					}
-				}
+			if (blocks.isEmpty()) {
+				continue;
 			}
+
+			handleChunkRender(renderer, chunk, this.misturnedDeepslate);
+			handleBlocksRender(renderer, chunk, blocks, this.misturnedDeepslate);
 		}
 
 		//end renderer
@@ -216,6 +186,15 @@ public class ShikariNewChunks extends ToggleableModule {
 		final double y = (double) check.getSubSetting("RenderY").getValue();
 
 		renderChunk(renderer, chunk, y, true, true, color);
+	}
+
+	private void handleBlocksRender(IRenderer3D renderer, LevelChunk chunk, ArrayList<BlockPos> blocks, @NotNull BooleanSetting check) {
+		final ColorSetting blockColorSetting = ((ColorSetting) check.getSubSetting("BlockColor"));
+		final int color = ColorUtils.transparency(blockColorSetting.getValueRGB(), blockColorSetting.getAlpha() / 255f);
+		ChunkPos chunkOffset = chunk.getPos();
+		for (BlockPos pos : blocks) {
+			renderer.drawBox(pos.offset(chunkOffset.x * 16, 0, chunkOffset.z * 16),true, true, color);
+		}
 	}
 
 	private void renderChunk(@NotNull IRenderer3D renderer, @NotNull LevelChunk chunk, double y, boolean fill, boolean outline, int color) {
@@ -232,18 +211,15 @@ public class ShikariNewChunks extends ToggleableModule {
 		);
 	}
 
-	private void checkChunkForBlock(int minCheckY, int maxCheckY, int maxDistance, boolean useCache, BooleanSetting check, Function3<LevelChunk, BlockPos, BooleanSetting, Boolean>... checkBlockPos) {
-		if (!useCache) {
-			this.chunkCache.clear();
-		}
-
+	@SafeVarargs
+	private void checkChunkForBlock(int minCheckY, int maxCheckY, int maxDistance, BooleanSetting check, Function3<LevelChunk, BlockPos, BooleanSetting, Boolean>... checkBlockPos) {
 		assert mc.player != null;
 
 		final ArrayList<LevelChunk> checkChunks = (ArrayList<LevelChunk>) WorldUtils.getChunks();
 		checkChunks.removeIf(chunk -> mc.player.chunkPosition().getChessboardDistance(chunk.getPos()) > maxDistance);
 
 		for (LevelChunk chunk : checkChunks) {
-			if (this.chunkCache.containsKey(chunk) && useCache) {
+			if (this.chunkCache.containsKey(chunk)) {
 				continue;
 			} else {
 				this.chunkCache.put(chunk, new ArrayList<>());
@@ -264,16 +240,36 @@ public class ShikariNewChunks extends ToggleableModule {
 	}
 
 	@Override
-	public void onEnable() {}
+	public void onEnable() {
+		this.checkThread = new Thread(() -> {
+			if (this.misturnedDeepslate.getValue()) {
+				int maxCheckY = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MaxCheckY")).getValue();
+				int minCheckY = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MinCheckY")).getValue();
+				int maxDistance = ((NumberSetting<Integer>)this.misturnedDeepslate.getSubSetting("MaxDistance")).getValue();
+				if (minCheckY <= maxCheckY) {
+
+					checkChunkForBlock(
+							minCheckY,
+							maxCheckY,
+							maxDistance,
+							this.misturnedDeepslate,
+							BlockChecks::isMisturnedDeepslate
+					);
+				}
+			}
+		});
+		this.checkThread.start();
+	}
 	
 	@Override
 	public void onDisable() {
+		this.checkThread.interrupt();
 		this.chunkCache.clear();
 	}
 }
 
 class BlockChecks {
-	public static boolean isMisturnedDeepslate(LevelChunk chunk, BlockPos blockPos, BooleanSetting check) {
+	static boolean isMisturnedDeepslate(LevelChunk chunk, BlockPos blockPos, BooleanSetting check) {
 		boolean misturned = chunk.getBlockState(blockPos).getBlock() == Blocks.DEEPSLATE && chunk.getBlockState(blockPos) != chunk.getBlockState(blockPos).getBlock().defaultBlockState();
 		assert Minecraft.getInstance().level != null;
 		// search nearby blocks for skeleton head, avoiding false positives from deep darks
