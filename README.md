@@ -1,6 +1,8 @@
 # Shikari
 rusherhack plugin
+
 epic cool newchunks module
+
 primarily focuses on guessing instead of exploits (which can get patched)
 
 ## how 2 use
