@@ -3,7 +3,6 @@ package org.majorsopa.shikari;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.util.Tuple;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.ChunkPos;
@@ -23,7 +22,10 @@ import org.rusherhack.core.setting.NumberSetting;
 import org.rusherhack.core.utils.ColorUtils;
 
 import java.awt.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 
@@ -38,7 +40,7 @@ public class ShikariNewChunks extends ToggleableModule {
 
 
 	// the cached BlockPos are relative to the chunk
-	ConcurrentHashMap<LevelChunk, CacheElement> chunkCache = new ConcurrentHashMap<>();
+	ConcurrentHashMap<LevelChunk, ConcurrentHashMap<BooleanSetting, CacheElement>> chunkCache = new ConcurrentHashMap<>();
 	private final NumberSetting<Integer> maxDistance = new NumberSetting<>(
 			"MaxDistance",
 			"Max distance to check, in chunks (chessboard)",
@@ -50,11 +52,11 @@ public class ShikariNewChunks extends ToggleableModule {
 	private final NumberSetting<Double> renderY = new NumberSetting<>("RenderY", 0.0, -64.0, 320.0)
 			.incremental(1.0);
 	private final BooleanSetting misturnedDeepslate = new BooleanSetting("MisturnedDeepslate", "Chunks with misoriented deepslate", true);
-	private final ColorSetting misturnedDeepslateChunkColor = new ColorSetting("ChunkColor", Color.RED)
+	private final ColorSetting misturnedDeepslateChunkColor = new ColorSetting("ChunkColor", new Color(255, 0, 0, 30))
 			.setAlphaAllowed(true)
 			.setThemeSyncAllowed(false)
 			.setRainbowAllowed(false);
-	private final ColorSetting misturnedDeepslateBlockColor = new ColorSetting("BlockColor", Color.ORANGE)
+	private final ColorSetting misturnedDeepslateBlockColor = new ColorSetting("BlockColor", new Color(255, 180, 0, 30))
 			.setAlphaAllowed(true)
 			.setThemeSyncAllowed(false)
 			.setRainbowAllowed(false);
@@ -67,8 +69,8 @@ public class ShikariNewChunks extends ToggleableModule {
 			32
 	)
 			.incremental(1);
-	private final BooleanSetting missingBrute = new BooleanSetting("MissingBrute", "Chunks with misoriented deepslate", true);
-	private final ColorSetting missingBruteChunkColor = new ColorSetting("ChunkColor", Color.RED)
+	private final BooleanSetting missingBrute = new BooleanSetting("MissingBrute", "Chunks with misoriented deepslate", true);  // brute check distance is hardcoded 1 chunks for now
+	private final ColorSetting missingBruteChunkColor = new ColorSetting("ChunkColor", new Color(255, 200, 0, 30))
 			.setAlphaAllowed(true)
 			.setThemeSyncAllowed(false)
 			.setRainbowAllowed(false);
@@ -106,20 +108,25 @@ public class ShikariNewChunks extends ToggleableModule {
 		//begin renderer
 		renderer.begin(event.getMatrixStack());
 
-		for (Map.Entry<LevelChunk, CacheElement> entry : this.chunkCache.entrySet()) {
+		for (Map.Entry<LevelChunk, ConcurrentHashMap<BooleanSetting, CacheElement>> entry : this.chunkCache.entrySet()) {
 			LevelChunk chunk = entry.getKey();
-			CacheElement value = entry.getValue();
-			BooleanSetting check = value.getCheck();
-			ArrayList<BlockPos> blocks = value.getBlocks();
-			ArrayList<Integer> ids = value.getIds();
+			ConcurrentHashMap<BooleanSetting, CacheElement> values = entry.getValue();
+			for (Map.Entry<BooleanSetting, CacheElement> cacheElementSet : values.entrySet()) {
+				BooleanSetting check = cacheElementSet.getKey();
+				CacheElement cacheElement = cacheElementSet.getValue();
+				List<BlockPos> blocks = cacheElement.getBlocks();
+				List<Integer> ids = cacheElement.getIds();
 
-			handleChunkRender(renderer, chunk, check);
-			handleBlocksRender(renderer, chunk, blocks, check);
-			for (int id : ids) {
-				assert Minecraft.getInstance().level != null;
-				Entity entity = Minecraft.getInstance().level.getEntity(id);
-				if (entity != null) {
-					handleEntityRender(renderer, event, entity, check);
+				handleChunkRender(renderer, chunk, check);
+				if (!blocks.isEmpty()) {
+					handleBlocksRender(renderer, chunk, blocks, check);
+				}
+				for (int id : ids) {
+					assert Minecraft.getInstance().level != null;
+					Entity entity = Minecraft.getInstance().level.getEntity(id);
+					if (entity != null) {
+						handleEntityRender(renderer, event, entity, check);
+					}
 				}
 			}
 		}
@@ -136,7 +143,7 @@ public class ShikariNewChunks extends ToggleableModule {
 		renderChunk(renderer, chunk, y, true, true, color);
 	}
 
-	private void handleBlocksRender(IRenderer3D renderer, LevelChunk chunk, ArrayList<BlockPos> blocks, @NotNull BooleanSetting check) {
+	private void handleBlocksRender(IRenderer3D renderer, LevelChunk chunk, List<BlockPos> blocks, @NotNull BooleanSetting check) {
 		final int color = getColorFromCheck(check, "BlockColor");
 		ChunkPos chunkOffset = chunk.getPos();
 		for (BlockPos pos : blocks) {
@@ -168,7 +175,7 @@ public class ShikariNewChunks extends ToggleableModule {
 		);
 	}
 
-	private ConcurrentHashMap<String, ArrayList<BlockPos>> checkChunkForBlocks(int minCheckY, int maxCheckY, LevelChunk chunk, ArrayList<Tuple<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>>> checkBlockPos) {
+	private ConcurrentHashMap<String, ArrayList<BlockPos>> checkChunkForBlocks(int minCheckY, int maxCheckY, LevelChunk chunk, ConcurrentHashMap<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>> checkBlockPos) {
 		ConcurrentHashMap<String, ArrayList<BlockPos>> blocks = new ConcurrentHashMap<>();
 
 		for (int x = 0; x < 16; x++) {
@@ -176,9 +183,9 @@ public class ShikariNewChunks extends ToggleableModule {
 				for (int z = 0; z < 16; z++) {
 					BlockPos relativePos = new BlockPos(x, y, z);
 					CheckableObject checkableObject = new CheckableObject(chunk, relativePos);
-					for (Tuple<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>> checkBlockPosFunction : checkBlockPos) {
-						BooleanSetting check = checkBlockPosFunction.getA();
-						BiFunction<CheckableObject, BooleanSetting, Integer> checkFunction = checkBlockPosFunction.getB();
+					for (Map.Entry<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>> checkBlockPosFunction : checkBlockPos.entrySet()) {
+						BooleanSetting check = checkBlockPosFunction.getKey();
+						BiFunction<CheckableObject, BooleanSetting, Integer> checkFunction = checkBlockPosFunction.getValue();
 						int checkResult = checkFunction.apply(checkableObject, check);
 						if (checkResult != 0) {
 							if (!blocks.containsKey(check.getName())) {
@@ -197,54 +204,103 @@ public class ShikariNewChunks extends ToggleableModule {
 	@Override
 	public void onEnable() {
 		this.checkThread = new Thread(() -> {
-			assert Minecraft.getInstance().level != null;
-			final boolean inOverworld = Minecraft.getInstance().level.dimension().equals(Level.OVERWORLD);
-			final int minCheckY;
-			final int maxCheckY;
-			if (inOverworld) {
-				minCheckY = -64;
-				maxCheckY = 319;
-			} else {
-				minCheckY = 0;
-				maxCheckY = 127;
-			}
-
-			int maxDistance = this.maxDistance.getValue();
-			final ArrayList<LevelChunk> checkChunks = getChunksInRange(maxDistance);
-
-			ArrayList<Tuple<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>>> blockChecks = new ArrayList<>();
-			if (this.misturnedDeepslate.getValue()) {
-				blockChecks.add(new Tuple<>(this.misturnedDeepslate, Checks::isMisturnedDeepslate));
-			}
-			if (this.missingBrute.getValue()) {
-				blockChecks.add(new Tuple<>(this.missingBrute, Checks::hasGildedBlackstone));
-			}
-
-
-			ConcurrentHashMap<LevelChunk, CacheElement> newCache = new ConcurrentHashMap<>();
-			// i love inefficient code
-			for (LevelChunk chunk : checkChunks) {
-				ConcurrentHashMap<String, ArrayList<BlockPos>> checkedChunk = this.checkChunkForBlocks(minCheckY, maxCheckY, chunk, blockChecks);
-				for (Map.Entry<String, ArrayList<BlockPos>> entry : checkedChunk.entrySet()) {
-					if (!newCache.containsKey(chunk)) {
-						newCache.put(chunk, new CacheElement((BooleanSetting) this.getSetting(entry.getKey())));
+			while (true) {
+				{
+					{
+						if (!this.isToggled()) {
+							break;
+						}
+						if (Minecraft.getInstance().level == null) {
+							try {
+								Thread.sleep(500);  // buh
+							} catch (InterruptedException e) {
+								throw new RuntimeException(e);
+							}
+							continue;
+						}
 					}
-					CacheElement cacheElement = newCache.get(chunk);
-					cacheElement.addBlockPoss(entry.getValue());
-				}
-			}
+
+					final boolean inOverworld = Minecraft.getInstance().level.dimension().equals(Level.OVERWORLD);
+					final int minCheckY;
+					final int maxCheckY;
+					if (inOverworld) {
+						minCheckY = -64;
+						maxCheckY = 319;
+					} else {
+						minCheckY = 0;
+						maxCheckY = 127;
+					}
+
+					int maxDistance = this.maxDistance.getValue();
+					final ArrayList<LevelChunk> checkChunks = getChunksInRange(maxDistance);
+
+					ConcurrentHashMap<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>> blockChecks = new ConcurrentHashMap<>();
+					if (this.misturnedDeepslate.getValue()) {
+						blockChecks.put(this.misturnedDeepslate, Checks::isMisturnedDeepslate);
+					}
+					if (this.missingBrute.getValue()) {
+						blockChecks.put(this.missingBrute, Checks::hasGildedBlackstone);
+					}
 
 
-			//ArrayList<Tuple<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>>> entityChecks = new ArrayList<>();
+					ConcurrentHashMap<LevelChunk, ConcurrentHashMap<BooleanSetting, CacheElement>> newCache = new ConcurrentHashMap<>();
+					// i love inefficient code
+					for (LevelChunk chunk : checkChunks) {
+						ConcurrentHashMap<String, ArrayList<BlockPos>> checkedChunk = this.checkChunkForBlocks(minCheckY, maxCheckY, chunk, blockChecks);
+
+						ArrayList<BlockPos> glidedBlackstones = checkedChunk.remove(this.missingBrute.getName());
+						if (glidedBlackstones != null) {
+							ArrayList<LevelChunk> surroundingChunks = getChunksAroundChunk(2, chunk);  // 2 distance = 5x5 area
+							if (surroundingChunks.size() == 25) {  // only bother rendering if you can see all the chunks. maybe make this a setting?
+								boolean foundBrute = false;
+								for (LevelChunk nearbyChunk : surroundingChunks) {
+									if (checkChunkForEntity(nearbyChunk, EntityType.PIGLIN_BRUTE) != 0) {
+										foundBrute = true;
+									}
+								}
+								if (!foundBrute) {
+									for (LevelChunk nearbyChunk : surroundingChunks) {
+										if (!newCache.containsKey(nearbyChunk)) {
+											newCache.put(nearbyChunk, new ConcurrentHashMap<>());
+										}
+										ConcurrentHashMap<BooleanSetting, CacheElement> cacheMap = newCache.get(nearbyChunk);
+										if (!cacheMap.containsKey(this.missingBrute)) {
+											cacheMap.put(this.missingBrute, new CacheElement());
+										}
+									}
+								}
+							}
+						}
+
+						for (Map.Entry<String, ArrayList<BlockPos>> entry : checkedChunk.entrySet()) {
+							if (!newCache.containsKey(chunk)) {
+								newCache.put(chunk, new ConcurrentHashMap<>());
+							}
+							ConcurrentHashMap<BooleanSetting, CacheElement> chunkEntry = newCache.get(chunk);
+							if (!chunkEntry.containsKey((BooleanSetting) this.getSetting(entry.getKey()))) {
+								chunkEntry.put((BooleanSetting) this.getSetting(entry.getKey()), new CacheElement());
+							}
+							chunkEntry.get((BooleanSetting) this.getSetting(entry.getKey())).addBlockPossNoDupe(entry.getValue());
+						}
+					}
 
 
-			for (Map.Entry<LevelChunk, CacheElement> entry : newCache.entrySet()) {
-				LevelChunk chunk = entry.getKey();
-				CacheElement cacheElement = entry.getValue();
-				if (!this.chunkCache.containsKey(chunk)) {
-					this.chunkCache.put(chunk, cacheElement);
-				} else {
-					this.chunkCache.get(chunk).addAll(cacheElement);
+					//ArrayList<Tuple<BooleanSetting, BiFunction<CheckableObject, BooleanSetting, Integer>>> entityChecks = new ArrayList<>();
+
+
+					for (Map.Entry<LevelChunk, ConcurrentHashMap<BooleanSetting, CacheElement>> entry : newCache.entrySet()) {
+						LevelChunk chunk = entry.getKey();
+						for (Map.Entry<BooleanSetting, CacheElement> cacheElement : entry.getValue().entrySet()) {
+							if (!this.chunkCache.containsKey(chunk)) {
+								this.chunkCache.put(chunk, new ConcurrentHashMap<>());
+							}
+							ConcurrentHashMap<BooleanSetting, CacheElement> chunkEntry = this.chunkCache.get(chunk);
+							if (!chunkEntry.containsKey(cacheElement.getKey())) {
+								chunkEntry.put(cacheElement.getKey(), new CacheElement());
+							}
+							chunkEntry.get(cacheElement.getKey()).addAllNoDupe(cacheElement.getValue());
+						}
+					}
 				}
 			}
 		});
@@ -253,7 +309,12 @@ public class ShikariNewChunks extends ToggleableModule {
 	
 	@Override
 	public void onDisable() {
-		this.checkThread.interrupt();
+		//this.checkThread.interrupt();
+		try {
+			this.checkThread.join();
+		} catch (InterruptedException e) {
+			throw new RuntimeException(e);
+		}
 		this.chunkCache.clear();
 	}
 
@@ -264,6 +325,31 @@ public class ShikariNewChunks extends ToggleableModule {
 			return mc.player.chunkPosition().getChessboardDistance(chunk.getPos()) > maxDistance;
 		});
 		return checkChunks;
+	}
+
+	private static ArrayList<LevelChunk> getChunksAroundChunk(int maxDistance, LevelChunk chunk) {  // checks chunks around a chunk, distance is chessboard distance
+		final ArrayList<LevelChunk> checkChunks = (ArrayList<LevelChunk>) WorldUtils.getChunks();
+		checkChunks.removeIf(chunk1 -> chunk.getPos().getChessboardDistance(chunk1.getPos()) > maxDistance);
+		return checkChunks;
+	}
+
+	private static int checkChunkForEntity(LevelChunk chunk, EntityType<? extends Entity> entityType) {
+		int found = 0;
+
+		ArrayList<Entity> entities = new ArrayList<>();
+		for (Entity entity : WorldUtils.getEntities()) {
+			if (entity.getType() == entityType) {
+				entities.add(entity);
+			}
+		}
+
+		for (Entity entity : entities) {
+			if (entity.chunkPosition().equals(chunk.getPos())) {
+				found++;
+			}
+		}
+
+		return found;
 	}
 }
 
@@ -314,21 +400,6 @@ class Checks {
 			return 0;
 		}
 	}
-
-	static int checkChunkForEntity(CheckableObject checkableObject, BooleanSetting check) {
-		int found = 0;
-
-		ArrayList<Entity> entities = (ArrayList<Entity>) WorldUtils.getEntities();
-		entities.removeIf(entity -> entity.getType() != checkableObject.getEntityType());
-
-		for (Entity entity : entities) {
-			if (entity.chunkPosition().equals(checkableObject.getChunk().getPos())) {
-				found++;
-			}
-		}
-
-		return found;
-	}
 }
 
 class CheckableObject {
@@ -362,38 +433,65 @@ class CheckableObject {
 }
 
 class CacheElement {
-	private BooleanSetting check;
-	private ArrayList<BlockPos> blocks;
-	private ArrayList<Integer> ids;
+	private CacheList<BlockPos> blocks;
+	private CacheList<Integer> ids;
 
-	public CacheElement(BooleanSetting check) {
-		this.check = check;
-		this.blocks = new ArrayList<>();
-		this.ids = new ArrayList<>();
+	public CacheElement() {
+		this.blocks = new CacheList<>();
+		this.ids = new CacheList<>();
 	}
 
-	public BooleanSetting getCheck() {
-		return this.check;
+	public List<BlockPos> getBlocks() {
+		return this.blocks.getList();
 	}
 
-	public ArrayList<BlockPos> getBlocks() {
-		return this.blocks;
+	public List<Integer> getIds() {
+		return this.ids.getList();
 	}
 
-	public ArrayList<Integer> getIds() {
-		return this.ids;
+	public void addBlockPoss(List<BlockPos> blockPos) {
+		this.blocks.getList().addAll(blockPos);
 	}
 
-	public void addBlockPoss(ArrayList<BlockPos> blockPos) {
-		this.blocks.addAll(blockPos);
+	public void addBlockPossNoDupe(List<BlockPos> blockPos) {
+		for (BlockPos pos : blockPos) {
+			if (!this.blocks.getList().contains(pos)) {
+				this.blocks.getList().add(pos);
+			}
+		}
 	}
 
-	public void addIds(ArrayList<Integer> ids) {
-		this.ids.addAll(ids);
+	public void addIds(List<Integer> ids) {
+		this.ids.getList().addAll(ids);
+	}
+
+	public void addIdsNoDupe(List<Integer> ids) {
+		for (int id : ids) {
+			if (!this.ids.getList().contains(id)) {
+				this.ids.getList().add(id);
+			}
+		}
 	}
 
 	public void addAll(CacheElement other) {
 		this.addBlockPoss(other.getBlocks());
 		this.addIds(other.getIds());
+	}
+
+	public void addAllNoDupe(CacheElement other) {
+		this.addBlockPossNoDupe(other.getBlocks());
+		this.addIdsNoDupe(other.getIds());
+	}
+
+	class CacheList<T> {
+		private List<T> inner;
+
+		public CacheList() {
+			this.inner = Collections.synchronizedList(new ArrayList<>());
+		}
+
+		public List<T> getList() {
+			return this.inner;
+		}
 	}
 }
